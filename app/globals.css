@@ -1,26 +1,109 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f5f0e9;
+  --foreground: #312b26;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --font-serif: "Noto Serif TC", "Songti TC", "PMingLiU", serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
 }
 
 body {
+  margin: 0;
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button:not(:disabled) {
+  cursor: pointer;
+}
+
+.section-kicker {
+  margin-bottom: 0.25rem;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #b07a60;
+}
+
+.section-title {
+  font-family: "Noto Serif TC", "Songti TC", "PMingLiU", serif;
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.field-label {
+  margin-bottom: 0.5rem;
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: #675d54;
+}
+
+.field-input {
+  width: 100%;
+  border: 1px solid #e2d9d0;
+  border-radius: 0.9rem;
+  background: white;
+  padding: 0.85rem 1rem;
+  color: #342e29;
+  outline: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.field-input:focus {
+  border-color: #b77c5e;
+  box-shadow: 0 0 0 3px rgba(183, 124, 94, 0.13);
+}
+
+.primary-button {
+  width: 100%;
+  border: 0;
+  border-radius: 1rem;
+  background: #a96748;
+  padding: 0.9rem 1.2rem;
+  font-weight: 800;
+  color: white;
+  box-shadow: 0 8px 20px rgba(148, 89, 60, 0.2);
+  transition: transform 160ms ease, background 160ms ease;
+}
+
+.primary-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: #935a3f;
+}
+
+.primary-button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.form-error {
+  border-radius: 0.8rem;
+  background: #fff0ed;
+  padding: 0.7rem 0.9rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #a8433b;
+}
+
+::selection {
+  background: #ead2c4;
 }
