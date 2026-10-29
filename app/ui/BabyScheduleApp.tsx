@@ -8,6 +8,7 @@ type Modal =
   | { name: "settings" }
   | { name: "manage" }
   | { name: "record"; type: RecordTypeView }
+  | { name: "edit"; type: RecordTypeView; record: BabyRecordView }
   | { name: "finish"; record: BabyRecordView }
   | null;
 
@@ -116,6 +117,46 @@ function CloseButton({ onClick }: { onClick: () => void }) {
     >
       ×
     </button>
+  );
+}
+
+function UpdateIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className="size-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M20 7v5h-5" />
+      <path d="M4 17v-5h5" />
+      <path d="M6.1 9a7 7 0 0 1 11.5-2.6L20 12" />
+      <path d="M17.9 15a7 7 0 0 1-11.5 2.6L4 12" />
+    </svg>
+  );
+}
+
+function DeleteIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className="size-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 6h18" />
+      <path d="M8 6V4h8v2" />
+      <path d="m19 6-1 14H6L5 6" />
+      <path d="M10 11v5M14 11v5" />
+    </svg>
   );
 }
 
@@ -422,6 +463,14 @@ export default function BabyScheduleApp() {
                         onFinish={() =>
                           setModal({ name: "finish", record })
                         }
+                        onUpdate={() => {
+                          const type = typeById.get(record.recordTypeId);
+                          if (type) {
+                            setModal({ name: "edit", type, record });
+                          } else {
+                            notify("找不到這筆紀錄的項目類型");
+                          }
+                        }}
                         onDelete={() => void removeRecord(record)}
                       />
                     ))}
@@ -466,6 +515,19 @@ export default function BabyScheduleApp() {
           }}
         />
       )}
+      {modal?.name === "edit" && (
+        <RecordModal
+          type={modal.type}
+          date={selectedDate}
+          record={modal.record}
+          onClose={() => setModal(null)}
+          onSaved={async () => {
+            await loadRecords(selectedDate);
+            setModal(null);
+            notify("紀錄已更新");
+          }}
+        />
+      )}
       {modal?.name === "finish" && (
         <FinishModal
           record={modal.record}
@@ -490,11 +552,13 @@ function TimelineItem({
   record,
   type,
   onFinish,
+  onUpdate,
   onDelete,
 }: {
   record: BabyRecordView;
   type?: RecordTypeView;
   onFinish: () => void;
+  onUpdate: () => void;
   onDelete: () => void;
 }) {
   const isRange = record.kind === "sleep" || record.kind === "customRange";
@@ -546,7 +610,7 @@ function TimelineItem({
               </p>
             )}
           </div>
-          <div className="flex gap-1">
+          <div className="flex items-center gap-1">
             {isRange && !record.endedAt && (
               <button
                 type="button"
@@ -558,11 +622,21 @@ function TimelineItem({
             )}
             <button
               type="button"
-              onClick={onDelete}
-              className="grid size-8 place-items-center rounded-full text-sm text-[#a79c92] hover:bg-[#f5e9e6] hover:text-[#b64f48]"
-              aria-label="刪除紀錄"
+              onClick={onUpdate}
+              className="grid size-9 place-items-center rounded-full border border-[#e5ddd5] bg-white text-[#766b62] transition hover:border-[#c9ad9c] hover:bg-[#f8efe9] hover:text-[#945f43]"
+              aria-label="更新紀錄"
+              title="更新"
             >
-              ♡
+              <UpdateIcon />
+            </button>
+            <button
+              type="button"
+              onClick={onDelete}
+              className="grid size-9 place-items-center rounded-full border border-[#eadbd8] bg-white text-[#a05d58] transition hover:border-[#d5a5a0] hover:bg-[#f9e9e7] hover:text-[#a63d36]"
+              aria-label="刪除紀錄"
+              title="刪除"
+            >
+              <DeleteIcon />
             </button>
           </div>
         </div>
@@ -645,6 +719,7 @@ function ManageTypesModal({
   const [icon, setIcon] = useState(EMOJIS[0]);
   const [kind, setKind] = useState<RecordKind>("customTime");
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
   async function toggle(type: RecordTypeView) {
@@ -686,6 +761,30 @@ function ManageTypesModal({
     }
   }
 
+  async function removeType(type: RecordTypeView) {
+    if (
+      !window.confirm(
+        `確定刪除自訂項目「${type.label}」嗎？刪除後無法復原。`,
+      )
+    ) {
+      return;
+    }
+
+    setDeletingId(type.id);
+    setError("");
+    try {
+      const result = await readJson<{ deletedCount: number }>(
+        await fetch(`/api/record-types/${type.id}`, { method: "DELETE" }),
+      );
+      if (result.deletedCount !== 1) throw new Error("未刪除任何項目");
+      await onChanged(`已刪除「${type.label}」`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "刪除失敗");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   return (
     <ModalShell
       title="管理記錄項目"
@@ -720,6 +819,18 @@ function ManageTypesModal({
             >
               {type.isVisible ? "顯示中" : "已隱藏"}
             </button>
+            {!type.builtIn && (
+              <button
+                type="button"
+                onClick={() => void removeType(type)}
+                disabled={deletingId === type.id}
+                className="grid size-9 shrink-0 place-items-center rounded-full border border-[#eadbd8] bg-white text-[#a05d58] transition hover:border-[#d5a5a0] hover:bg-[#f9e9e7] hover:text-[#a63d36] disabled:cursor-wait disabled:opacity-45"
+                aria-label={`刪除「${type.label}」自訂項目`}
+                title="刪除自訂項目"
+              >
+                <DeleteIcon />
+              </button>
+            )}
           </div>
         ))}
       </div>
@@ -805,21 +916,34 @@ function ManageTypesModal({
 function RecordModal({
   type,
   date,
+  record,
   onClose,
   onSaved,
 }: {
   type: RecordTypeView;
   date: string;
+  record?: BabyRecordView;
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
-  const [time, setTime] = useState(nowTime());
-  const [endTime, setEndTime] = useState("");
-  const [category, setCategory] = useState(
-    type.kind === "milk" ? "母奶" : type.kind === "diaper" ? "兩者" : "兩側",
+  const [time, setTime] = useState(
+    record ? timeFromIso(record.startedAt) : nowTime(),
   );
-  const [value, setValue] = useState("");
-  const [note, setNote] = useState("");
+  const [endTime, setEndTime] = useState(
+    record?.endedAt ? timeFromIso(record.endedAt) : "",
+  );
+  const [category, setCategory] = useState(
+    record?.category ??
+      (type.kind === "milk"
+        ? "母奶"
+        : type.kind === "diaper"
+          ? "兩者"
+          : "兩側"),
+  );
+  const [value, setValue] = useState(
+    record?.value === undefined ? "" : String(record.value),
+  );
+  const [note, setNote] = useState(record?.note ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -846,8 +970,8 @@ function RecordModal({
     setError("");
     try {
       await readJson(
-        await fetch("/api/records", {
-          method: "POST",
+        await fetch(record ? `/api/records/${record.id}` : "/api/records", {
+          method: record ? "PUT" : "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             recordTypeId: type.id,
@@ -862,7 +986,13 @@ function RecordModal({
       );
       await onSaved();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "新增失敗");
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : record
+            ? "更新失敗"
+            : "新增失敗",
+      );
     } finally {
       setSaving(false);
     }
@@ -870,7 +1000,7 @@ function RecordModal({
 
   return (
     <ModalShell
-      title={`${type.icon} 記錄${type.label}`}
+      title={`${type.icon} ${record ? "更新" : "記錄"}${type.label}`}
       subtitle={displayDate(date).title}
       onClose={onClose}
     >
@@ -966,7 +1096,7 @@ function RecordModal({
         </label>
         {error && <p className="form-error">{error}</p>}
         <button disabled={saving} className="primary-button">
-          {saving ? "儲存中…" : "儲存紀錄"}
+          {saving ? "儲存中…" : record ? "更新紀錄" : "儲存紀錄"}
         </button>
       </form>
     </ModalShell>

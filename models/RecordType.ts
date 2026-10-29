@@ -178,3 +178,18 @@ export async function setRecordTypeVisibility(
   const updated = await collection.findOne({ _id: id });
   return updated ? serializeRecordType(updated) : null;
 }
+
+export async function deleteCustomRecordType(
+  id: ObjectId,
+): Promise<{ deletedCount: number; recordType: RecordTypeView | null }> {
+  const collection = await getRecordTypesCollection();
+  const existing = await collection.findOne({ _id: id });
+  if (!existing) return { deletedCount: 0, recordType: null };
+  if (existing.builtIn) throw new Error("內建記錄項目不可刪除");
+
+  const result = await collection.deleteOne({ _id: id, builtIn: false });
+  return {
+    deletedCount: result.deletedCount,
+    recordType: serializeRecordType(existing),
+  };
+}

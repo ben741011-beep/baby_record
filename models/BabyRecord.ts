@@ -137,6 +137,84 @@ export function serializeBabyRecord(document: BabyRecordDocument): BabyRecordVie
   };
 }
 
+type EditableRecordFields = Pick<BabyRecordDocument, "startedAt" | "note"> &
+  Partial<
+    Pick<BabyRecordDocument, "endedAt" | "category" | "value" | "unit">
+  >;
+
+function parseEditableRecordFields(
+  type: RecordTypeDocument,
+  input: Record<string, unknown>,
+): EditableRecordFields {
+  const date = parseDate(input.date);
+  const time = parseTime(input.time);
+  const startedAt = taipeiDate(date, time);
+  if (startedAt.getTime() > Date.now() + 60_000) {
+    throw new Error("紀錄時間不可晚於現在");
+  }
+
+  const fields: EditableRecordFields = {
+    startedAt,
+    note: parseOptionalNote(input.note),
+  };
+
+  if (type.kind === "milk") {
+    fields.category = parseCategory(
+      input.category,
+      ["母奶", "配方奶"],
+      "喝奶類型",
+    );
+    fields.value = parseNumber(input.value, "奶量", {
+      min: 0,
+      max: 3000,
+      integer: true,
+    });
+    fields.unit = "ml";
+  } else if (type.kind === "diaper") {
+    fields.category = parseCategory(
+      input.category,
+      ["小便", "大便", "兩者"],
+      "尿布類型",
+    );
+  } else if (type.kind === "pump") {
+    fields.category = parseCategory(
+      input.category,
+      ["左側", "右側", "兩側"],
+      "擠奶側別",
+    );
+    fields.value = parseNumber(input.value, "奶量", {
+      min: 0,
+      max: 3000,
+      integer: true,
+    });
+    fields.unit = "ml";
+  } else if (type.kind === "temperature") {
+    fields.value = parseNumber(input.value, "體溫", { min: 30, max: 45 });
+    fields.unit = "°C";
+  } else if (type.kind === "customInteger") {
+    fields.value = parseNumber(input.value, "數量", {
+      min: 0,
+      integer: true,
+    });
+    fields.unit = "count";
+  } else if (type.kind === "customDecimal") {
+    fields.value = parseNumber(input.value, "數值");
+  }
+
+  if (type.kind === "sleep" || type.kind === "customRange") {
+    if (input.endTime) {
+      const endTime = parseTime(input.endTime, "結束時間");
+      let endedAt = taipeiDate(date, endTime);
+      if (endedAt <= startedAt) {
+        endedAt = new Date(endedAt.getTime() + 86_400_000);
+      }
+      fields.endedAt = endedAt;
+    }
+  }
+
+  return fields;
+}
+
 async function findRecordType(id: unknown): Promise<RecordTypeDocument> {
   if (typeof id !== "string" || !MongoObjectId.isValid(id)) {
     throw new Error("記錄類型不存在");
@@ -150,55 +228,52 @@ async function findRecordType(id: unknown): Promise<RecordTypeDocument> {
 
 export async function createBabyRecord(input: Record<string, unknown>): Promise<BabyRecordView> {
   const type = await findRecordType(input.recordTypeId);
-  const date = parseDate(input.date);
-  const time = parseTime(input.time);
-  const startedAt = taipeiDate(date, time);
-  if (startedAt.getTime() > Date.now() + 60_000) throw new Error("不可建立未來時間的紀錄");
+  const fields = parseEditableRecordFields(type, input);
 
   const record: BabyRecordDocument = {
     _id: new MongoObjectId(),
     recordTypeId: type._id,
     kind: type.kind,
-    startedAt,
-    note: parseOptionalNote(input.note),
+    ...fields,
     createdAt: new Date(),
     updatedAt: new Date(),
   };
-
-  if (type.kind === "milk") {
-    record.category = parseCategory(input.category, ["母奶", "配方奶"], "喝奶類型");
-    record.value = parseNumber(input.value, "奶量", { min: 0, max: 3000, integer: true });
-    record.unit = "ml";
-  } else if (type.kind === "diaper") {
-    record.category = parseCategory(input.category, ["小便", "大便", "兩者"], "尿布類型");
-  } else if (type.kind === "pump") {
-    record.category = parseCategory(input.category, ["左側", "右側", "兩側"], "擠奶側別");
-    record.value = parseNumber(input.value, "奶量", { min: 0, max: 3000, integer: true });
-    record.unit = "ml";
-  } else if (type.kind === "temperature") {
-    record.value = parseNumber(input.value, "體溫", { min: 30, max: 45 });
-    record.unit = "°C";
-  } else if (type.kind === "customInteger") {
-    record.value = parseNumber(input.value, "數量", { min: 0, integer: true });
-    record.unit = "count";
-  } else if (type.kind === "customDecimal") {
-    record.value = parseNumber(input.value, "數值");
-  }
-
-  if (type.kind === "sleep" || type.kind === "customRange") {
-    if (input.endTime) {
-      const endTime = parseTime(input.endTime, "結束時間");
-      let endedAt = taipeiDate(date, endTime);
-      if (endedAt <= startedAt) endedAt = new Date(endedAt.getTime() + 86_400_000);
-      record.endedAt = endedAt;
-    }
-  }
 
   const collection = await getBabyRecordsCollection();
   const result = await collection.insertOne(record);
   const inserted = await collection.findOne({ _id: result.insertedId });
   if (!inserted) throw new Error("紀錄新增後無法讀回");
   return serializeBabyRecord(inserted);
+}
+
+export async function updateBabyRecord(
+  id: ObjectId,
+  input: Record<string, unknown>,
+): Promise<BabyRecordView | null> {
+  const collection = await getBabyRecordsCollection();
+  const existing = await collection.findOne({ _id: id });
+  if (!existing) return null;
+
+  const type = await findRecordType(existing.recordTypeId.toHexString());
+  if (type.kind !== existing.kind) {
+    throw new Error("紀錄類型與既有資料不一致");
+  }
+
+  const fields = parseEditableRecordFields(type, input);
+  const unset: Record<string, ""> = {};
+  for (const field of ["endedAt", "category", "value", "unit"] as const) {
+    if (fields[field] === undefined) unset[field] = "";
+  }
+
+  await collection.updateOne(
+    { _id: id },
+    {
+      $set: { ...fields, updatedAt: new Date() },
+      ...(Object.keys(unset).length > 0 ? { $unset: unset } : {}),
+    },
+  );
+  const updated = await collection.findOne({ _id: id });
+  return updated ? serializeBabyRecord(updated) : null;
 }
 
 export async function listBabyRecordsByDate(dateInput: unknown): Promise<BabyRecordView[]> {
@@ -210,6 +285,12 @@ export async function listBabyRecordsByDate(dateInput: unknown): Promise<BabyRec
     .sort({ startedAt: -1, _id: -1 })
     .toArray();
   return documents.map(serializeBabyRecord);
+}
+
+export async function countBabyRecordsByType(
+  recordTypeId: ObjectId,
+): Promise<number> {
+  return (await getBabyRecordsCollection()).countDocuments({ recordTypeId });
 }
 
 export async function finishRangeRecord(id: ObjectId, endTimeInput: unknown): Promise<BabyRecordView | null> {
